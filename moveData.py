@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python
 """
 Created on Thu Sep  5 12:02:31 2019
 
@@ -11,6 +11,11 @@ import os
 import random
 random.seed(0)
 from shutil import copyfile
+
+if not os.path.isdir('data/train'):
+    os.mkdir('data/train')
+if not os.path.isdir('data/val'):
+    os.mkdir('data/val')
 
 dirs = [x[0] for x in os.walk('data/all')][1:]
 for idir in dirs:
