@@ -7,3 +7,6 @@ cp testProject/.vimrc ~/.vimrc
 git clone https://github.com/sevenquarkoniums/interpretability.git
 cd interpretability
 wget http://files.fast.ai/data/imagenet-sample-train.tar.gz
+
+# to delete
+gcloud deployment-manager deployments delete name
