@@ -31,6 +31,8 @@ parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet18',
                     help='model architecture: ' +
                         ' | '.join(model_names) +
                         ' (default: resnet18)')
+parser.add_argument('-m', '--modified', dest='modified', action='store_true',
+                    help='Run the modified version.')
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 parser.add_argument('--epochs', default=90, type=int, metavar='N',
@@ -112,6 +114,59 @@ def main():
         # Simply call main_worker function
         main_worker(args.gpu, ngpus_per_node, args)
 
+class AlexNetMod(nn.Module):
+
+    def __init__(self, num_classes=1000):
+        super(AlexNetMod, self).__init__()
+#        self.features = nn.Sequential(
+#            nn.Conv2d(3, 64, kernel_size=11, stride=4, padding=2),
+#            nn.ReLU(inplace=True),
+#            nn.MaxPool2d(kernel_size=3, stride=2),
+#            nn.Conv2d(64, 192, kernel_size=5, padding=2),
+#            nn.ReLU(inplace=True),
+#            nn.MaxPool2d(kernel_size=3, stride=2),
+#            nn.Conv2d(192, 384, kernel_size=3, padding=1),
+#            nn.ReLU(inplace=True),
+#            nn.Conv2d(384, 256, kernel_size=3, padding=1),
+#            nn.ReLU(inplace=True),
+#            nn.Conv2d(256, 256, kernel_size=3, padding=1),
+#            nn.ReLU(inplace=True),
+#            nn.MaxPool2d(kernel_size=3, stride=2),
+#        )
+        self.feature1 = nn.Conv2d(3, 64, kernel_size=11, stride=4, padding=2)
+        self.featureOther = nn.Sequential(
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=3, stride=2),
+            nn.Conv2d(64, 192, kernel_size=5, padding=2),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=3, stride=2),
+            nn.Conv2d(192, 384, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(384, 256, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(256, 256, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=3, stride=2),
+        )
+        self.avgpool = nn.AdaptiveAvgPool2d((6, 6))
+        self.classifier = nn.Sequential(
+            nn.Dropout(),
+            nn.Linear(256 * 6 * 6, 4096),
+            nn.ReLU(inplace=True),
+            nn.Dropout(),
+            nn.Linear(4096, 4096),
+            nn.ReLU(inplace=True),
+            nn.Linear(4096, num_classes),
+        )
+
+    def forward(self, x):
+        y = self.feature1(x)
+        z = torch.flatten(y, 1)
+        x = self.featureOther(y)
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        x = self.classifier(x)
+        return x, z
 
 def main_worker(gpu, ngpus_per_node, args):
     global best_acc1
@@ -135,7 +190,10 @@ def main_worker(gpu, ngpus_per_node, args):
         model = models.__dict__[args.arch](pretrained=True)
     else:
         print("=> creating model '{}'".format(args.arch))
-        model = models.__dict__[args.arch]()
+        if args.modified:
+            model = AlexNetMod(num_classes=774)
+        else:
+            model = models.__dict__[args.arch](num_classes=774)
 
     if args.distributed:
         # For multiprocessing distributed, DistributedDataParallel constructor
@@ -161,8 +219,11 @@ def main_worker(gpu, ngpus_per_node, args):
     else:
         # DataParallel will divide and allocate batch_size to all available GPUs
         if args.arch.startswith('alexnet') or args.arch.startswith('vgg'):
-            model.features = torch.nn.DataParallel(model.features)
-            model.cuda()
+            if args.modified:
+                model = torch.nn.DataParallel(model).cuda()
+            else:
+                model.features = torch.nn.DataParallel(model.features)
+                model.cuda()
         else:
             model = torch.nn.DataParallel(model).cuda()
 
@@ -280,8 +341,18 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
         target = target.cuda(args.gpu, non_blocking=True)
 
         # compute output
-        output = model(images)
-        loss = criterion(output, target)
+        if args.modified:
+            output, middle = model(images)
+            interpret = 0
+            for neuron in range(middle.size()[1]):
+                for category in range(700):
+                    thisCategory = (target == category).nonzero().squeeze(dim=0)
+                    if thisCategory.size()[0] >= 2:
+                        interpret += (middle[:, neuron].squeeze()[thisCategory].std() - 1)**2
+            loss = criterion(output, target) + interpret
+        else:
+            output = model(images)
+            loss = criterion(output, target)
 
         # measure accuracy and record loss
         acc1, acc5 = accuracy(output, target, topk=(1, 5))
@@ -323,7 +394,10 @@ def validate(val_loader, model, criterion, args):
             target = target.cuda(args.gpu, non_blocking=True)
 
             # compute output
-            output = model(images)
+            if args.modified:
+                output, middle = model(images)
+            else:
+                output = model(images)
             loss = criterion(output, target)
 
             # measure accuracy and record loss

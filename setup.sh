@@ -18,9 +18,9 @@ chmod +x moveData.py
 chmod +x imagenet.py
 ./moveData.py
 
-./imagenet.py -a alexnet -j 16 data
-
+./imagenet.py -a alexnet -j 16 --epochs 1000 data
 ./imagenet.py -a alexnet -j 16 --start-epoch 90 --epochs 1000 --resume checkpoint.pth.tar data
+./imagenet.py -a resnet18 -j 16 --epochs 1000 data
 
 # to delete
 gcloud deployment-manager deployments delete imagenet
